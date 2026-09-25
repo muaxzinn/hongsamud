@@ -1,392 +1,797 @@
-<!DOCTYPE html>
-<html lang="th" class="h-full bg-slate-950 text-slate-100">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Library Dashboard — Supabase + ESP32 RFID</title>
-  
-  <!-- Tailwind CSS Framework CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- Supabase Official JS SDK CDN (v2) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
-  <!-- Lucide Icons CDN -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  
-  <!-- Google Fonts: Inter & Sarabun -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  
-  <style>
-    body { font-family: 'Sarabun', 'Inter', sans-serif; }
-    .glass { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); }
-    @keyframes pulse-subtle {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.8; transform: scale(1.03); }
+/**
+ * ==============================================================================
+ * 💻 SMART LIBRARY SYSTEM — FRONTEND APPLICATION LOGIC (app.js)
+ * ตรรกะการทำงานฝั่งหน้าเว็บ: รองรับทั้ง Supabase Realtime Cloud และโหมดตัวอย่าง (Demo Mode)
+ * ==============================================================================
+ */
+
+let supabase = null;
+let isDemoMode = false;
+
+// ==============================================================================
+// 1. ระบบจัดการพื้นที่จัดเก็บข้อมูลที่ปลอดภัย (Safe Storage for Safari & file://)
+// ==============================================================================
+const safeStorage = {
+  get: (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn('LocalStorage access restricted:', e);
+      return null;
     }
-    .live-dot { animation: pulse-subtle 2s infinite ease-in-out; }
-    .hidden { display: none !important; }
-  </style>
-</head>
-<body class="h-full flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+  },
+  set: (key, val) => {
+    try {
+      localStorage.setItem(key, val);
+    } catch (e) {
+      console.warn('LocalStorage save restricted:', e);
+    }
+  },
+  remove: (key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {}
+  }
+};
 
-  <!-- Header Navigation -->
-  <header class="sticky top-0 z-40 border-b border-slate-800 glass">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      
-      <!-- Brand & Title -->
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-          <i data-lucide="book-open-check" class="w-5 h-5 text-white"></i>
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <span class="text-base sm:text-lg font-bold tracking-tight text-white">Smart Library System</span>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium tracking-wide uppercase">Realtime</span>
-          </div>
-          <p class="text-[11px] text-slate-400 hidden sm:block">ESP32 RFID + OLED & Supabase Cloud Integration</p>
-        </div>
-      </div>
+// ==============================================================================
+// 2. ฐานข้อมูลตัวอย่าง (Mock Seed Data สำหรับ Demo Mode)
+// ==============================================================================
+let mockData = {
+  books: [
+    { id: 1, qr_code: 'BK00001', rfid_uid: '55667788', title: 'Clean Code: A Handbook of Agile Software Craftsmanship', author: 'Robert C. Martin', status: 'available' },
+    { id: 2, qr_code: 'BK00002', rfid_uid: 'AABBCCDD', title: 'Designing Data-Intensive Applications', author: 'Martin Kleppmann', status: 'borrowed' },
+    { id: 3, qr_code: 'BK00003', rfid_uid: 'C0FFEE99', title: 'The Pragmatic Programmer: Your Journey To Mastery', author: 'David Thomas, Andrew Hunt', status: 'available' },
+    { id: 4, qr_code: 'BK00004', rfid_uid: 'BOOK-RFID-0004', title: 'เจ้าชายน้อย (The Little Prince)', author: 'Antoine de Saint-Exupéry', status: 'available' },
+    { id: 5, qr_code: 'BK00005', rfid_uid: 'BOOK-RFID-0005', title: 'Cosmos: มหัศจรรย์แห่งจักรวาล', author: 'Carl Sagan', status: 'available' }
+  ],
+  members: [
+    { id: 1, full_name: 'สมชาย ใจดี (Wokwi Green)', phone: '081-234-5678', card_uid: '11223344', is_active: true },
+    { id: 2, full_name: 'สมหญิง รักเรียน (Wokwi Blue)', phone: '089-876-5432', card_uid: '01020304', is_active: true },
+    { id: 3, full_name: 'กิตติศักดิ์ พัฒนาการ', phone: '086-111-2233', card_uid: 'E4F5A6B7', is_active: true }
+  ],
+  transactions: [
+    {
+      id: 1,
+      borrowed_at: new Date(Date.now() - 3600000 * 3).toISOString(),
+      due_date: new Date(Date.now() + 86400000 * 11).toISOString().split('T')[0],
+      returned_at: null,
+      fine_amount: 0.00,
+      status: 'borrowed',
+      book_title: 'Designing Data-Intensive Applications',
+      borrower_name: 'สมชาย ใจดี (Wokwi Green)'
+    },
+    {
+      id: 2,
+      borrowed_at: new Date(Date.now() - 86400000 * 4).toISOString(),
+      due_date: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
+      returned_at: new Date(Date.now() - 86400000 * 1).toISOString(),
+      fine_amount: 0.00,
+      status: 'returned',
+      book_title: 'Clean Code: A Handbook of Agile Software Craftsmanship',
+      borrower_name: 'สมหญิง รักเรียน (Wokwi Blue)'
+    }
+  ]
+};
 
-      <!-- Header Actions -->
-      <div class="flex items-center gap-2.5">
-        <div id="connectionStatus" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
-          <span class="w-2 h-2 rounded-full bg-slate-500"></span>
-          <span>กำลังตรวจสอบการเชื่อมต่อ...</span>
-        </div>
-        <button onclick="openConfigModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
-          <i data-lucide="settings" class="w-4 h-4"></i>
-          <span>ตั้งค่า API</span>
-        </button>
-      </div>
-    </div>
-  </header>
+// เรนเดอร์ Lucide Icons อย่างปลอดภัย
+function renderIcons() {
+  try {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  } catch (e) {
+    console.warn('Lucide icon error:', e);
+  }
+}
 
-  <!-- Main Content -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+// ระบบ Toast Notification แจ้งเตือนสวยงาม
+function showToast(msg, type = 'info') {
+  let toastContainer = document.getElementById('toastContainer');
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.id = 'toastContainer';
+    toastContainer.className = 'fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none';
+    document.body.appendChild(toastContainer);
+  }
+
+  const toast = document.createElement('div');
+  const bgClass = type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' :
+                  type === 'error' ? 'bg-rose-600 text-white border-rose-500' :
+                  'bg-slate-800 text-slate-100 border-slate-700';
+
+  toast.className = `p-4 rounded-xl shadow-2xl border text-xs sm:text-sm font-medium flex items-center gap-3 transition-all duration-300 transform translate-y-4 opacity-0 pointer-events-auto ${bgClass}`;
+  toast.innerHTML = `<span>${msg}</span>`;
+
+  toastContainer.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.remove('translate-y-4', 'opacity-0');
+  }, 10);
+
+  setTimeout(() => {
+    toast.classList.add('opacity-0', 'translate-y-2');
+    setTimeout(() => toast.remove(), 300);
+  }, 3500);
+}
+
+// ==============================================================================
+// 3. การจัดการการตั้งค่าการเชื่อมต่อ (Configuration Management)
+// ==============================================================================
+function cleanSupabaseUrl(url) {
+  if (!url) return '';
+  let cleaned = url.trim();
+  // ตัด /rest/v1 หรือ /rest/v1/ หรือ / ออก เพื่อให้เป็น Base URL เสมอ
+  cleaned = cleaned.replace(/\/rest\/v1\/?$/, '');
+  cleaned = cleaned.replace(/\/+$/, '');
+  return cleaned;
+}
+
+function getConfig() {
+  let url = safeStorage.get('SP_URL') || (window.DEFAULT_CONFIG && window.DEFAULT_CONFIG.SUPABASE_URL) || '';
+  let key = safeStorage.get('SP_KEY') || (window.DEFAULT_CONFIG && window.DEFAULT_CONFIG.SUPABASE_ANON_KEY) || '';
+  url = cleanSupabaseUrl(url);
+  key = (key || '').trim();
+
+  // แก้ไขค่าใน Storage อัตโนมัติหากเคยบันทึกแบบมี /rest/v1 ติดมา
+  if (safeStorage.get('SP_URL') && safeStorage.get('SP_URL') !== url) {
+    safeStorage.set('SP_URL', url);
+  }
+
+  return { url, key };
+}
+
+// เริ่มต้นการเชื่อมต่อ Supabase Client
+function initSupabase() {
+  const { url, key } = getConfig();
+  const statusEl = document.getElementById('connectionStatus');
+
+  // ตรวจสอบว่ามี URL และ Key จริงหรือไม่
+  const hasValidConfig = url && key && !url.includes('YOUR_PROJECT_REF') && !key.includes('YOUR_ANON_KEY') && url.startsWith('http');
+
+  if (!hasValidConfig) {
+    // เข้าสู่โหมดตัวอย่าง (Demo Mode) ให้หน้าเว็บแสดงผลทันที ไม่ค้าง!
+    isDemoMode = true;
+    supabase = null;
+    if (statusEl) {
+      statusEl.className = 'cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition';
+      statusEl.title = 'คลิกเพื่อตั้งค่า Supabase จริง';
+      statusEl.onclick = openConfigModal;
+      statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>โหมดตัวอย่าง (Demo Mode) — คลิกตั้งค่า</span>`;
+    }
+    loadAllData();
+    return;
+  }
+
+  // พยายามเชื่อมต่อกับ Supabase จริง
+  try {
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+      throw new Error('Supabase SDK CDN ยังโหลดไม่เสร็จสิ้น');
+    }
+
+    supabase = window.supabase.createClient(url, key);
+    isDemoMode = false;
+
+    if (statusEl) {
+      statusEl.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+      statusEl.onclick = null;
+      statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span><span>Supabase เชื่อมต่อสด</span>`;
+    }
+
+    loadAllData();
+    subscribeRealtime();
+    showToast('🟢 เชื่อมต่อกับ Supabase สำเร็จ!', 'success');
+
+  } catch (err) {
+    console.error('Supabase Initialization Error:', err);
+    isDemoMode = true;
+    if (statusEl) {
+      statusEl.className = 'cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 transition';
+      statusEl.onclick = openConfigModal;
+      statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400"></span><span>เชื่อมต่อไม่สำเร็จ (คลิกเพื่อแก้ไข)</span>`;
+    }
+    loadAllData();
+  }
+}
+
+// ==============================================================================
+// 4. การรับข้อมูลแบบเรียลไทม์ (Supabase Realtime Subscription)
+// ==============================================================================
+function subscribeRealtime() {
+  if (!supabase || isDemoMode) return;
+
+  try {
+    supabase
+      .channel('library_live_feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload) => {
+        console.log('⚡ Realtime Transaction Event Detected:', payload);
+        fetchTransactions();
+        fetchStats();
+        playNotificationSound();
+        showToast('⚡ มีรายการสแกนใหม่จากตู้ ESP32!', 'success');
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'books' }, (payload) => {
+        console.log('⚡ Realtime Book Status Change:', payload);
+        fetchBooks();
+        fetchStats();
+      })
+      .subscribe((status) => {
+        console.log('Realtime Subscription Status:', status);
+      });
+  } catch (e) {
+    console.warn('Realtime subscription failed:', e);
+  }
+}
+
+// เสียงแจ้งเตือนสั้นๆ เมื่อมีการสแกนสำเร็จจากตู้ ESP32
+function playNotificationSound() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.25);
+  } catch (e) {}
+}
+
+// ==============================================================================
+// 5. การดึงข้อมูลและการแสดงผล (Data Fetching & UI Rendering)
+// ==============================================================================
+async function loadAllData() {
+  await fetchStats();
+  await fetchTransactions();
+  await fetchBooks();
+  await fetchMembers();
+}
+
+// ดึงตัวเลขสถิติด้านบน
+async function fetchStats() {
+  if (isDemoMode || !supabase) {
+    const totalBooks = mockData.books.length;
+    const availableBooks = mockData.books.filter(b => b.status === 'available').length;
+    const borrowedBooks = mockData.books.filter(b => b.status === 'borrowed').length;
+    const totalBorrowers = mockData.members.length;
+
+    document.getElementById('statTotalBooks').textContent = totalBooks;
+    document.getElementById('statAvailableBooks').textContent = availableBooks;
+    document.getElementById('statBorrowedBooks').textContent = borrowedBooks;
+    document.getElementById('statTotalBorrowers').textContent = totalBorrowers;
+    return;
+  }
+
+  try {
+    const { count: totalBooks } = await supabase.from('books').select('*', { count: 'exact', head: true }).is('deleted_at', null);
+    const { count: availableBooks } = await supabase.from('books').select('*', { count: 'exact', head: true }).eq('status', 'available').is('deleted_at', null);
+    const { count: borrowedBooks } = await supabase.from('books').select('*', { count: 'exact', head: true }).eq('status', 'borrowed').is('deleted_at', null);
+    const { count: totalBorrowers } = await supabase.from('borrowers').select('*', { count: 'exact', head: true });
+
+    document.getElementById('statTotalBooks').textContent = totalBooks ?? 0;
+    document.getElementById('statAvailableBooks').textContent = availableBooks ?? 0;
+    document.getElementById('statBorrowedBooks').textContent = borrowedBooks ?? 0;
+    document.getElementById('statTotalBorrowers').textContent = totalBorrowers ?? 0;
+  } catch (err) {
+    console.error('Fetch Stats Error:', err);
+  }
+}
+
+// ดึงประวัติการทำรายการล่าสุด (Live Feed)
+async function fetchTransactions() {
+  const tbody = document.getElementById('transactionTableBody');
+  if (!tbody) return;
+
+  if (isDemoMode || !supabase) {
+    renderTransactionRows(mockData.transactions);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select(`
+        id,
+        borrowed_at,
+        due_date,
+        returned_at,
+        fine_amount,
+        status,
+        books ( title, rfid_uid, qr_code ),
+        borrowers ( full_name )
+      `)
+      .order('borrowed_at', { ascending: false })
+      .limit(25);
+
+    if (error || !data || data.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">ยังไม่มีประวัติการทำรายการในระบบ</td></tr>`;
+      return;
+    }
+
+    const formatted = data.map(tx => ({
+      id: tx.id,
+      borrowed_at: tx.borrowed_at,
+      due_date: tx.due_date,
+      returned_at: tx.returned_at,
+      fine_amount: tx.fine_amount,
+      status: tx.status,
+      book_title: tx.books ? tx.books.title : 'หนังสือไม่ทราบชื่อ',
+      borrower_name: tx.borrowers ? tx.borrowers.full_name : 'ไม่ระบุผู้ยืม'
+    }));
+
+    renderTransactionRows(formatted);
+  } catch (err) {
+    console.error('Fetch Transactions Error:', err);
+    renderTransactionRows(mockData.transactions);
+  }
+}
+
+function renderTransactionRows(list) {
+  const tbody = document.getElementById('transactionTableBody');
+  if (!tbody) return;
+
+  if (!list || list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">ยังไม่มีประวัติการทำรายการในระบบ</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map(tx => {
+    const isReturned = tx.status === 'returned';
+    const bookTitle = tx.book_title || 'หนังสือไม่ทราบชื่อ';
+    const borrowerName = tx.borrower_name || 'ไม่ระบุผู้ยืม';
+    const borrowTime = new Date(tx.borrowed_at).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' });
+    const returnTime = tx.returned_at ? new Date(tx.returned_at).toLocaleTimeString('th-TH', { timeStyle: 'short' }) : null;
+
+    const actionBadge = isReturned
+      ? `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><i data-lucide="arrow-down-left" class="w-3 h-3"></i>คืนหนังสือ</span>`
+      : `<span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20"><i data-lucide="arrow-up-right" class="w-3 h-3"></i>ยืมหนังสือ</span>`;
+
+    const fineBadge = parseFloat(tx.fine_amount) > 0
+      ? `<span class="text-rose-400 font-semibold font-mono">${parseFloat(tx.fine_amount).toFixed(2)}</span>`
+      : `<span class="text-slate-500 font-mono">0.00</span>`;
+
+    return `
+      <tr class="hover:bg-slate-800/40 transition">
+        <td class="px-6 py-4 text-xs text-slate-400 font-mono">${borrowTime}</td>
+        <td class="px-6 py-4">${actionBadge}</td>
+        <td class="px-6 py-4 font-medium text-white">${bookTitle}</td>
+        <td class="px-6 py-4 text-slate-300">${borrowerName}</td>
+        <td class="px-6 py-4 text-xs text-slate-300">
+          ${isReturned ? `คืนแล้วเมื่อ ${returnTime}` : `ครบกำหนด: <span class="text-amber-300 font-medium">${tx.due_date}</span>`}
+        </td>
+        <td class="px-6 py-4">${fineBadge}</td>
+      </tr>
+    `;
+  }).join('');
+
+  renderIcons();
+}
+
+// ดึงรายการหนังสือทั้งหมด
+async function fetchBooks() {
+  const tbody = document.getElementById('booksTableBody');
+  if (!tbody) return;
+
+  if (isDemoMode || !supabase) {
+    renderBookRows(mockData.books);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('books')
+      .select('*')
+      .is('deleted_at', null)
+      .order('id', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      renderBookRows(mockData.books);
+      return;
+    }
+
+    renderBookRows(data);
+  } catch (err) {
+    console.error('Fetch Books Error:', err);
+    renderBookRows(mockData.books);
+  }
+}
+
+function renderBookRows(books) {
+  const tbody = document.getElementById('booksTableBody');
+  if (!tbody) return;
+
+  if (!books || books.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-slate-500">ไม่มีหนังสือในคลัง</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = books.map(b => {
+    let statusBadge = '';
+    if (b.status === 'available') {
+      statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">ว่าง (Available)</span>`;
+    } else if (b.status === 'borrowed') {
+      statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">ถูกยืม (Borrowed)</span>`;
+    } else {
+      statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">${b.status}</span>`;
+    }
+
+    return `
+      <tr class="hover:bg-slate-800/40 transition">
+        <td class="px-6 py-4 font-mono text-xs text-indigo-400 font-semibold">${b.qr_code}</td>
+        <td class="px-6 py-4 font-mono text-xs text-emerald-300">${b.rfid_uid || '<span class="text-slate-500">ยังไม่ผูก Tag</span>'}</td>
+        <td class="px-6 py-4 font-medium text-white">${b.title}</td>
+        <td class="px-6 py-4 text-slate-400 text-xs">${b.author || '-'}</td>
+        <td class="px-6 py-4">${statusBadge}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ดึงรายชื่อสมาชิกและบัตรประจำตัว
+async function fetchMembers() {
+  const tbody = document.getElementById('membersTableBody');
+  if (!tbody) return;
+
+  if (isDemoMode || !supabase) {
+    renderMemberRows(mockData.members);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('borrowers')
+      .select(`
+        id,
+        full_name,
+        phone,
+        rfid_cards ( card_uid, is_active )
+      `)
+      .order('id', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      renderMemberRows(mockData.members);
+      return;
+    }
+
+    const formatted = data.map(m => {
+      const card = m.rfid_cards && m.rfid_cards.length > 0 ? m.rfid_cards[0] : null;
+      return {
+        id: m.id,
+        full_name: m.full_name,
+        phone: m.phone,
+        card_uid: card ? card.card_uid : null,
+        is_active: card ? card.is_active : false
+      };
+    });
+
+    renderMemberRows(formatted);
+  } catch (err) {
+    console.error('Fetch Members Error:', err);
+    renderMemberRows(mockData.members);
+  }
+}
+
+function renderMemberRows(members) {
+  const tbody = document.getElementById('membersTableBody');
+  if (!tbody) return;
+
+  if (!members || members.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-slate-500">ไม่มีรายชื่อสมาชิก</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = members.map(m => {
+    const cardUid = m.card_uid || '<span class="text-slate-500">ไม่มีบัตร</span>';
+    const isActive = m.is_active;
+
+    return `
+      <tr class="hover:bg-slate-800/40 transition">
+        <td class="px-6 py-4 text-xs text-slate-400 font-mono">${m.id}</td>
+        <td class="px-6 py-4 font-medium text-white">${m.full_name}</td>
+        <td class="px-6 py-4 text-slate-300 text-xs font-mono">${m.phone || '-'}</td>
+        <td class="px-6 py-4 font-mono text-xs text-indigo-400 font-semibold">${cardUid}</td>
+        <td class="px-6 py-4">
+          ${isActive 
+            ? `<span class="px-2 py-0.5 rounded-full text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">พร้อมใช้งาน</span>`
+            : `<span class="px-2 py-0.5 rounded-full text-[11px] bg-slate-800 text-slate-400 border border-slate-700">ปิดใช้งาน</span>`
+          }
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ==============================================================================
+// 6. การทำรายการยืม-คืนผ่านเคาน์เตอร์เจ้าหน้าที่ (Manual Actions)
+// ==============================================================================
+async function handleManualBorrow(e) {
+  e.preventDefault();
+
+  const qr = document.getElementById('manualQrCode').value.trim();
+  const name = document.getElementById('manualBorrowerName').value.trim();
+  const cardUid = document.getElementById('manualCardUid').value.trim();
+
+  if (isDemoMode || !supabase) {
+    // ทำงานในโหมดตัวอย่าง (Demo Mode) ทันที
+    const book = mockData.books.find(b => b.qr_code.toUpperCase() === qr.toUpperCase() || b.rfid_uid.toUpperCase() === cardUid.toUpperCase());
+    const bookTitle = book ? book.title : 'หนังสือ QR: ' + qr;
     
-    <!-- Top Stats Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-      
-      <div class="glass rounded-2xl p-5 border border-slate-800 relative overflow-hidden">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">หนังสือทั้งหมด</span>
-          <div class="w-9 h-9 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center">
-            <i data-lucide="library" class="w-5 h-5"></i>
-          </div>
-        </div>
-        <p id="statTotalBooks" class="text-3xl font-bold mt-2 text-white">--</p>
-        <span class="text-xs text-slate-400 mt-1 block">มี RFID Tag แปะตัวเล่ม</span>
-      </div>
+    if (book) book.status = 'borrowed';
 
-      <div class="glass rounded-2xl p-5 border border-slate-800 relative overflow-hidden">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">พร้อมให้ยืม (Available)</span>
-          <div class="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-            <i data-lucide="check-circle" class="w-5 h-5"></i>
-          </div>
-        </div>
-        <p id="statAvailableBooks" class="text-3xl font-bold mt-2 text-emerald-400">--</p>
-        <span class="text-xs text-emerald-500/80 mt-1 block">อยู่บนชั้นวางหนังสือ</span>
-      </div>
+    const newTx = {
+      id: Date.now(),
+      borrowed_at: new Date().toISOString(),
+      due_date: new Date(Date.now() + 86400000 * 7).toISOString().split('T')[0],
+      returned_at: null,
+      fine_amount: 0.00,
+      status: 'borrowed',
+      book_title: bookTitle,
+      borrower_name: name
+    };
+    mockData.transactions.unshift(newTx);
 
-      <div class="glass rounded-2xl p-5 border border-slate-800 relative overflow-hidden">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">กำลังถูกยืม (Borrowed)</span>
-          <div class="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
-            <i data-lucide="bookmark" class="w-5 h-5"></i>
-          </div>
-        </div>
-        <p id="statBorrowedBooks" class="text-3xl font-bold mt-2 text-amber-400">--</p>
-        <span class="text-xs text-amber-500/80 mt-1 block">อยู่ระหว่างการยืมอ่าน</span>
-      </div>
+    showToast(`✅ [Demo] บันทึกการยืมสำเร็จ: ${bookTitle}`, 'success');
+    playNotificationSound();
+    document.getElementById('manualBorrowForm').reset();
+    fetchStats();
+    fetchTransactions();
+    fetchBooks();
+    switchTab('live');
+    return;
+  }
 
-      <div class="glass rounded-2xl p-5 border border-slate-800 relative overflow-hidden">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">สมาชิกทั้งหมด</span>
-          <div class="w-9 h-9 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
-            <i data-lucide="users" class="w-5 h-5"></i>
-          </div>
-        </div>
-        <p id="statTotalBorrowers" class="text-3xl font-bold mt-2 text-purple-400">--</p>
-        <span class="text-xs text-purple-400/80 mt-1 block">ลงทะเบียนบัตร RFID แล้ว</span>
-      </div>
+  try {
+    const { data, error } = await supabase.rpc('admin_borrow_book', {
+      p_qr_code: qr,
+      p_borrower_name: name,
+      p_rfid_card_uid: cardUid
+    });
 
-    </div>
+    if (error) {
+      alert('เกิดข้อผิดพลาดจากระบบ: ' + error.message);
+      return;
+    }
 
-    <!-- Navigation Tabs -->
-    <div class="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
-      <button onclick="switchTab('live')" id="tabLive" class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition whitespace-nowrap">
-        <i data-lucide="radio" class="w-4 h-4 text-emerald-300"></i>
-        <span>การสแกนแบบ Realtime</span>
-      </button>
-      <button onclick="switchTab('books')" id="tabBooks" class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-2 whitespace-nowrap">
-        <i data-lucide="book" class="w-4 h-4"></i>
-        <span>คลังหนังสือ & RFID Tag</span>
-      </button>
-      <button onclick="switchTab('members')" id="tabMembers" class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-2 whitespace-nowrap">
-        <i data-lucide="credit-card" class="w-4 h-4"></i>
-        <span>สมาชิก & บัตรประจำตัว</span>
-      </button>
-      <button onclick="switchTab('manual')" id="tabManual" class="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-2 whitespace-nowrap">
-        <i data-lucide="user-check" class="w-4 h-4"></i>
-        <span>เคาน์เตอร์เจ้าหน้าที่ (Manual)</span>
-      </button>
-    </div>
+    if (data.status === 'success') {
+      showToast(`✅ บันทึกการยืมสำเร็จ: ${data.book_title}`, 'success');
+      playNotificationSound();
+      document.getElementById('manualBorrowForm').reset();
+      fetchTransactions();
+      fetchStats();
+      fetchBooks();
+      switchTab('live');
+    } else {
+      alert('❌ ไม่สามารถยืมได้: ' + data.message);
+    }
+  } catch (err) {
+    alert('เกิดข้อผิดพลาดในการเชื่อมต่อ: ' + err.message);
+  }
+}
 
-    <!-- TAB 1: Live Transactions (Realtime Stream) -->
-    <section id="panelLive" class="space-y-4">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 class="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
-            <span>ประวัติการทำรายการสดจากตู้ ESP32</span>
-            <span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span>
-          </h2>
-          <p class="text-xs text-slate-400 mt-0.5">เมื่อสมาชิกแตะบัตรที่ตู้สแกน ข้อมูลจะเด้งขึ้นหน้านี้ทันทีโดยไม่ต้องรีเฟรชหน้าจอ</p>
-        </div>
-        <button onclick="fetchTransactions()" class="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1.5 transition self-start sm:self-auto">
-          <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-          <span>รีเฟรชข้อมูล</span>
-        </button>
-      </div>
+// เพิ่มหนังสือใหม่เข้าคลัง
+async function submitAddBook(e) {
+  e.preventDefault();
 
-      <div class="glass rounded-2xl overflow-hidden border border-slate-800">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm text-slate-300">
-            <thead class="bg-slate-900/90 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="px-6 py-3.5">เวลาทำรายการ</th>
-                <th class="px-6 py-3.5">ประเภทรายการ</th>
-                <th class="px-6 py-3.5">ชื่อหนังสือ</th>
-                <th class="px-6 py-3.5">ผู้ทำรายการ</th>
-                <th class="px-6 py-3.5">กำหนดส่งคืน / วันที่คืน</th>
-                <th class="px-6 py-3.5">ค่าปรับ (บาท)</th>
-              </tr>
-            </thead>
-            <tbody id="transactionTableBody" class="divide-y divide-slate-800/80">
-              <tr>
-                <td colspan="6" class="px-6 py-10 text-center text-slate-500">กำลังเชื่อมต่อข้อมูลล่าสุด...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+  const qr_code = document.getElementById('newBookQr').value.trim();
+  const rfid_uid = document.getElementById('newBookRfid').value.trim();
+  const title = document.getElementById('newBookTitle').value.trim();
+  const author = document.getElementById('newBookAuthor').value.trim();
 
-    <!-- TAB 2: Books Catalog -->
-    <section id="panelBooks" class="space-y-4 hidden">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 class="text-base sm:text-lg font-semibold text-white">คลังหนังสือและรหัส RFID Tag</h2>
-          <p class="text-xs text-slate-400 mt-0.5">ลงทะเบียนหนังสือและผูกรหัส RFID Tag เพื่อให้ตู้ ESP32 ตรวจจับได้</p>
-        </div>
-        <button onclick="openAddBookModal()" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition self-start sm:self-auto">
-          <i data-lucide="plus" class="w-4 h-4"></i>
-          <span>เพิ่มหนังสือใหม่</span>
-        </button>
-      </div>
+  if (isDemoMode || !supabase) {
+    mockData.books.push({
+      id: mockData.books.length + 1,
+      qr_code,
+      rfid_uid,
+      title,
+      author,
+      status: 'available'
+    });
+    showToast(`✅ [Demo] เพิ่มหนังสือ "${title}" เรียบร้อยแล้ว!`, 'success');
+    closeAddBookModal();
+    document.getElementById('formAddBook').reset();
+    fetchBooks();
+    fetchStats();
+    return;
+  }
 
-      <div class="glass rounded-2xl overflow-hidden border border-slate-800">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm text-slate-300">
-            <thead class="bg-slate-900/90 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="px-6 py-3.5">รหัส QR Code</th>
-                <th class="px-6 py-3.5">RFID Tag (สติกเกอร์บนเล่ม)</th>
-                <th class="px-6 py-3.5">ชื่อหนังสือ</th>
-                <th class="px-6 py-3.5">ผู้แต่ง</th>
-                <th class="px-6 py-3.5">สถานะ</th>
-              </tr>
-            </thead>
-            <tbody id="booksTableBody" class="divide-y divide-slate-800/80">
-              <tr>
-                <td colspan="5" class="px-6 py-10 text-center text-slate-500">กำลังโหลดรายการหนังสือ...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+  try {
+    const { error } = await supabase.from('books').insert({
+      qr_code,
+      rfid_uid,
+      title,
+      author,
+      category_id: 1,
+      status: 'available'
+    });
 
-    <!-- TAB 3: Members & Cards -->
-    <section id="panelMembers" class="space-y-4 hidden">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 class="text-base sm:text-lg font-semibold text-white">สมาชิกและบัตรประจำตัว RFID</h2>
-          <p class="text-xs text-slate-400 mt-0.5">ลงทะเบียนสมาชิกและผูกเลข UID ของบัตรประจำตัวสำหรับสแกน</p>
-        </div>
-        <button onclick="openAddMemberModal()" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition self-start sm:self-auto">
-          <i data-lucide="user-plus" class="w-4 h-4"></i>
-          <span>ลงทะเบียนสมาชิกใหม่</span>
-        </button>
-      </div>
+    if (error) {
+      alert('เกิดข้อผิดพลาด: ' + error.message);
+      return;
+    }
 
-      <div class="glass rounded-2xl overflow-hidden border border-slate-800">
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-sm text-slate-300">
-            <thead class="bg-slate-900/90 text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
-              <tr>
-                <th class="px-6 py-3.5">ID สมาชิก</th>
-                <th class="px-6 py-3.5">ชื่อ-นามสกุล</th>
-                <th class="px-6 py-3.5">เบอร์โทรศัพท์</th>
-                <th class="px-6 py-3.5">เลขบัตร RFID UID</th>
-                <th class="px-6 py-3.5">สถานะบัตร</th>
-              </tr>
-            </thead>
-            <tbody id="membersTableBody" class="divide-y divide-slate-800/80">
-              <tr>
-                <td colspan="5" class="px-6 py-10 text-center text-slate-500">กำลังโหลดรายชื่อสมาชิก...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+    showToast(`✅ เพิ่มหนังสือ "${title}" เข้าสู่ระบบเรียบร้อยแล้ว!`, 'success');
+    closeAddBookModal();
+    document.getElementById('formAddBook').reset();
+    fetchBooks();
+    fetchStats();
+  } catch (err) {
+    alert('บันทึกหนังสือไม่สำเร็จ: ' + err.message);
+  }
+}
 
-    <!-- TAB 4: Manual Admin Counter -->
-    <section id="panelManual" class="space-y-6 hidden">
-      <div class="glass rounded-2xl p-6 sm:p-8 border border-slate-800 max-w-2xl mx-auto">
-        <div class="flex items-center gap-3 border-b border-slate-800 pb-4">
-          <div class="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-            <i data-lucide="clipboard-pen" class="w-5 h-5"></i>
-          </div>
-          <div>
-            <h2 class="text-base sm:text-lg font-semibold text-white">เคาน์เตอร์ทำรายการด้วยตนเอง (Manual Desk)</h2>
-            <p class="text-xs text-slate-400">ใช้สำหรับแอดมินหรือบรรณารักษ์ทำรายการยืม-คืนผ่านหน้าจอคอมพิวเตอร์</p>
-          </div>
-        </div>
+// ลงทะเบียนสมาชิกใหม่และผูกเลขบัตร RFID
+async function submitAddMember(e) {
+  e.preventDefault();
 
-        <form id="manualBorrowForm" onsubmit="handleManualBorrow(event)" class="space-y-4 mt-6">
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1.5">รหัส QR Code ของหนังสือ</label>
-            <input type="text" id="manualQrCode" required placeholder="เช่น BK00001" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
-          </div>
+  const full_name = document.getElementById('newMemberName').value.trim();
+  const phone = document.getElementById('newMemberPhone').value.trim();
+  const card_uid = document.getElementById('newMemberCardUid').value.trim();
 
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1.5">ชื่อ-นามสกุล ผู้ยืม</label>
-            <input type="text" id="manualBorrowerName" required placeholder="เช่น สมชาย ใจดี" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
+  if (isDemoMode || !supabase) {
+    const newId = mockData.members.length + 1;
+    mockData.members.push({
+      id: newId,
+      full_name,
+      phone,
+      card_uid,
+      is_active: true
+    });
+    showToast(`✅ [Demo] ลงทะเบียนสมาชิก "${full_name}" เรียบร้อยแล้ว!`, 'success');
+    closeAddMemberModal();
+    document.getElementById('formAddMember').reset();
+    fetchMembers();
+    fetchStats();
+    return;
+  }
 
-          <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1.5">เลข UID บัตร RFID</label>
-            <input type="text" id="manualCardUid" required placeholder="เช่น USER-CARD-4821 หรือ A1B2C3D4" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
-          </div>
+  try {
+    const { data: borrower, error: err1 } = await supabase
+      .from('borrowers')
+      .insert({ full_name, phone })
+      .select()
+      .single();
 
-          <button type="submit" class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 font-medium text-white text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20">
-            <i data-lucide="check" class="w-4 h-4"></i>
-            <span>ยืนยันการยืมหนังสือ</span>
-          </button>
-        </form>
-      </div>
-    </section>
+    if (err1) {
+      alert('บันทึกสมาชิกไม่สำเร็จ: ' + err1.message);
+      return;
+    }
 
-  </main>
+    const { error: err2 } = await supabase
+      .from('rfid_cards')
+      .upsert({
+        card_uid,
+        borrower_id: borrower.id,
+        is_active: true
+      }, { onConflict: 'card_uid' });
 
-  <!-- Modal: ตั้งค่า Supabase -->
-  <div id="modalConfig" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="glass rounded-2xl max-w-lg w-full p-6 border border-slate-700 space-y-4">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-base font-semibold text-white flex items-center gap-2">
-          <i data-lucide="database" class="w-5 h-5 text-emerald-400"></i>
-          <span>ตั้งค่าการเชื่อมต่อ Supabase</span>
-        </h3>
-        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
-      </div>
+    if (err2) {
+      alert('ผูกบัตร RFID ไม่สำเร็จ: ' + err2.message);
+      return;
+    }
 
-      <div class="space-y-4 text-xs">
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">Supabase Project URL</label>
-          <input type="text" id="inputSupabaseUrl" placeholder="https://xyzcompany.supabase.co" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
-        </div>
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">Supabase anon / public key</label>
-          <textarea id="inputSupabaseKey" rows="3" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-[11px]"></textarea>
-        </div>
-        <p class="text-slate-400 text-[11px]">
-          * ค่าเหล่านี้จะถูกบันทึกไว้ใน Browser ของคุณ (localStorage) และสามารถเปลี่ยนได้ตลอดเวลา
-        </p>
-      </div>
+    showToast(`✅ ลงทะเบียนสมาชิก "${full_name}" เรียบร้อยแล้ว!`, 'success');
+    closeAddMemberModal();
+    document.getElementById('formAddMember').reset();
+    fetchMembers();
+    fetchStats();
+  } catch (err) {
+    alert('เกิดข้อผิดพลาด: ' + err.message);
+  }
+}
 
-      <div class="flex items-center justify-between pt-2">
-        <button type="button" onclick="switchToDemoMode()" class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/20">
-          ทดลองใช้โหมดตัวอย่าง (Demo Mode)
-        </button>
-        <div class="flex gap-2">
-          <button type="button" onclick="closeConfigModal()" class="px-4 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 text-slate-300">ปิด</button>
-          <button type="button" onclick="saveSupabaseConfig()" class="px-4 py-2 rounded-xl text-xs bg-indigo-600 hover:bg-indigo-500 text-white font-medium">บันทึกและเชื่อมต่อ</button>
-        </div>
-      </div>
-    </div>
-  </div>
+// ==============================================================================
+// 7. การสลับแท็บและการควบคุม Modal (UI State Helpers)
+// ==============================================================================
+function switchTab(tab) {
+  const tabs = ['live', 'books', 'members', 'manual'];
+  tabs.forEach(t => {
+    const panel = document.getElementById('panel' + t.charAt(0).toUpperCase() + t.slice(1));
+    const btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (panel) panel.classList.add('hidden');
+    if (btn) {
+      btn.className = 'px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-2 whitespace-nowrap';
+    }
+  });
 
-  <!-- Modal: เพิ่มหนังสือใหม่ -->
-  <div id="modalAddBook" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="glass rounded-2xl max-w-md w-full p-6 border border-slate-700 space-y-4">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-base font-semibold text-white">เพิ่มหนังสือใหม่เข้าสู่ระบบ</h3>
-        <button onclick="closeAddBookModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
-      </div>
+  const activePanel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
+  const activeBtn = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+  if (activePanel) activePanel.classList.remove('hidden');
+  if (activeBtn) {
+    activeBtn.className = 'px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium bg-indigo-600 text-white shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition whitespace-nowrap';
+  }
 
-      <form id="formAddBook" onsubmit="submitAddBook(event)" class="space-y-3.5 text-xs">
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">รหัส QR Code (ประจำเล่ม) *</label>
-          <input type="text" id="newBookQr" required placeholder="เช่น BK00004" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
-        </div>
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">เลข RFID Tag (สติกเกอร์ที่แปะบนตัวเล่ม) *</label>
-          <input type="text" id="newBookRfid" required placeholder="เช่น BOOK-RFID-0004 หรือ Hex จากเครื่องสแกน" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
-        </div>
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">ชื่อหนังสือ *</label>
-          <input type="text" id="newBookTitle" required placeholder="ชื่อเรื่องหนังสือ..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white">
-        </div>
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">ชื่อผู้แต่ง / ผู้เรียบเรียง</label>
-          <input type="text" id="newBookAuthor" placeholder="ชื่อผู้แต่ง..." class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white">
-        </div>
-        <div class="flex justify-end gap-2 pt-3">
-          <button type="button" onclick="closeAddBookModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">ยกเลิก</button>
-          <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium">บันทึกหนังสือ</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  if (tab === 'live') fetchTransactions();
+  if (tab === 'books') fetchBooks();
+  if (tab === 'members') fetchMembers();
+}
 
-  <!-- Modal: ลงทะเบียนสมาชิก & บัตร RFID -->
-  <div id="modalAddMember" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="glass rounded-2xl max-w-md w-full p-6 border border-slate-700 space-y-4">
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="text-base font-semibold text-white">ลงทะเบียนสมาชิก & ผูกบัตร RFID</h3>
-        <button onclick="closeAddMemberModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
-      </div>
+function openConfigModal() {
+  const { url, key } = getConfig();
+  const inputUrl = document.getElementById('inputSupabaseUrl');
+  const inputKey = document.getElementById('inputSupabaseKey');
+  if (inputUrl) inputUrl.value = url.includes('YOUR_PROJECT_REF') ? '' : url;
+  if (inputKey) inputKey.value = key.includes('YOUR_ANON_KEY') ? '' : key;
+  const modal = document.getElementById('modalConfig');
+  if (modal) modal.classList.remove('hidden');
+}
 
-      <form id="formAddMember" onsubmit="submitAddMember(event)" class="space-y-3.5 text-xs">
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">ชื่อ-นามสกุล สมาชิก *</label>
-          <input type="text" id="newMemberName" required placeholder="เช่น สมชาย ใจดี" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white">
-        </div>
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">เบอร์โทรศัพท์</label>
-          <input type="text" id="newMemberPhone" placeholder="เช่น 081-234-5678" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white">
-        </div>
-        <div>
-          <label class="block font-medium text-slate-300 mb-1">เลข RFID Card UID ของบัตร *</label>
-          <input type="text" id="newMemberCardUid" required placeholder="เช่น USER-CARD-9999 หรือ Hex เช่น A1B2C3D4" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
-          <span class="text-[11px] text-slate-400 mt-1 block">นำบัตรมาแตะที่เครื่องอ่านเพื่อดูเลข UID แล้วกรอกที่ช่องนี้</span>
-        </div>
-        <div class="flex justify-end gap-2 pt-3">
-          <button type="button" onclick="closeAddMemberModal()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">ยกเลิก</button>
-          <button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium">บันทึกสมาชิก</button>
-        </div>
-      </form>
-    </div>
-  </div>
+function closeConfigModal() {
+  const modal = document.getElementById('modalConfig');
+  if (modal) modal.classList.add('hidden');
+}
 
-  <!-- โหลดสคริปต์การทำงาน -->
-  <script src="config.js"></script>
-  <script src="app.js"></script>
-</body>
-</html>
+function saveSupabaseConfig() {
+  let url = document.getElementById('inputSupabaseUrl').value.trim();
+  let key = document.getElementById('inputSupabaseKey').value.trim();
+  url = cleanSupabaseUrl(url);
+  key = (key || '').trim();
+  
+  if (!url || !key) {
+    alert('กรุณากรอกทั้ง Supabase URL และ anon Key');
+    return;
+  }
 
+  safeStorage.set('SP_URL', url);
+  safeStorage.set('SP_KEY', key);
+  closeConfigModal();
+  initSupabase();
+}
+
+function switchToDemoMode() {
+  safeStorage.remove('SP_URL');
+  safeStorage.remove('SP_KEY');
+  closeConfigModal();
+  isDemoMode = true;
+  supabase = null;
+  initSupabase();
+  showToast('ℹ️ สลับเป็นโหมดตัวอย่าง (Demo Mode) เรียบร้อยแล้ว', 'info');
+}
+
+function openAddBookModal() {
+  const modal = document.getElementById('modalAddBook');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeAddBookModal() {
+  const modal = document.getElementById('modalAddBook');
+  if (modal) modal.classList.add('hidden');
+}
+
+function openAddMemberModal() {
+  const modal = document.getElementById('modalAddMember');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeAddMemberModal() {
+  const modal = document.getElementById('modalAddMember');
+  if (modal) modal.classList.add('hidden');
+}
+
+// จัดการปิด Modal เมื่อกดปุ่ม Escape หรือคลิกพื้นหลังสีดำ
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeConfigModal();
+    closeAddBookModal();
+    closeAddMemberModal();
+  }
+});
+
+// กำหนดให้คลิกพื้นหลังมืดของ Modal เพื่อปิดได้
+['modalConfig', 'modalAddBook', 'modalAddMember'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('click', (e) => {
+      if (e.target === el) {
+        el.classList.add('hidden');
+      }
+    });
+  }
+});
+
+// เริ่มต้นทำงานทันทีที่โหลดหน้าเว็บ
+document.addEventListener('DOMContentLoaded', () => {
+  renderIcons();
+  initSupabase();
+});
