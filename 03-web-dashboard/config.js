@@ -10,8 +10,8 @@
 
 window.DEFAULT_CONFIG = {
   // ใส่ URL ของโปรเจกต์ Supabase เช่น "https://xxxxxxxxxxxx.supabase.co"
-  SUPABASE_URL: "https://YOUR_PROJECT_REF.supabase.co",
+  SUPABASE_URL: "https://adejdtyxhgejtteuspwb.supabase.co/rest/v1/",
 
   // ใส่ anon / public key (รหัสยาวๆ ที่ขึ้นต้นด้วย eyJhbG...)
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZWpkdHl4aGdlanR0ZXVzcHdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzMzIyMTcsImV4cCI6MjEwNTkwODIxN30.td0BKgaK7Fp0O7waBKc-pXJWhAMZx8cxvMTytEeHX70"
 };
