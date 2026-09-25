@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "public": true,
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/03-web-dashboard/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/03-web-dashboard/$1"
+    }
+  ]
+}

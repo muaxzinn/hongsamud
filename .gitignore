@@ -1,0 +1,25 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Arduino / PlatformIO
+.pio
+.vscode/.browse.c_cpp.db*
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch
+
+# Node & Web
+node_modules/
+dist/
+.env
+.env.local
+
+# Laravel (if kept)
+/vendor
+/storage/*.key

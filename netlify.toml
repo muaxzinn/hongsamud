@@ -1,0 +1,7 @@
+[build]
+  publish = "03-web-dashboard"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
