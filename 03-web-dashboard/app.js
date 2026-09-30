@@ -5,7 +5,8 @@
  * ==============================================================================
  */
 
-let supabase = null;
+// ⚠️ ตัวแปรนี้ต้องไม่ชื่อ `supabase` เพราะจะชนกับ window.supabase (Supabase SDK CDN)
+let _supabaseClient = null;
 let isDemoMode = false;
 
 // ==============================================================================
@@ -149,9 +150,8 @@ function initSupabase() {
   const hasValidConfig = url && key && !url.includes('YOUR_PROJECT_REF') && !key.includes('YOUR_ANON_KEY') && url.startsWith('http');
 
   if (!hasValidConfig) {
-    // เข้าสู่โหมดตัวอย่าง (Demo Mode) ให้หน้าเว็บแสดงผลทันที ไม่ค้าง!
     isDemoMode = true;
-    supabase = null;
+    _supabaseClient = null;
     if (statusEl) {
       statusEl.className = 'cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition';
       statusEl.title = 'คลิกเพื่อตั้งค่า Supabase จริง';
@@ -162,13 +162,14 @@ function initSupabase() {
     return;
   }
 
-  // พยายามเชื่อมต่อกับ Supabase จริง
   try {
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') {
-      throw new Error('Supabase SDK CDN ยังโหลดไม่เสร็จสิ้น');
+    // ใช้ local var supabaseLib เข้าถึง SDK ไม่ชนกับ _supabaseClient
+    const supabaseLib = window.supabase;
+    if (!supabaseLib || typeof supabaseLib.createClient !== 'function') {
+      throw new Error('Supabase SDK CDN ยังโหลดไม่เสร็จสิ้น — กรุณารีเฟรชหน้า');
     }
 
-    supabase = window.supabase.createClient(url, key);
+    _supabaseClient = supabaseLib.createClient(url, key);
     isDemoMode = false;
 
     if (statusEl) {
@@ -184,11 +185,13 @@ function initSupabase() {
   } catch (err) {
     console.error('Supabase Initialization Error:', err);
     isDemoMode = true;
+    _supabaseClient = null;
     if (statusEl) {
       statusEl.className = 'cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 transition';
       statusEl.onclick = openConfigModal;
       statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400"></span><span>เชื่อมต่อไม่สำเร็จ (คลิกเพื่อแก้ไข)</span>`;
     }
+    showToast('⚠️ ' + err.message, 'error');
     loadAllData();
   }
 }
@@ -197,10 +200,10 @@ function initSupabase() {
 // 4. การรับข้อมูลแบบเรียลไทม์ (Supabase Realtime Subscription)
 // ==============================================================================
 function subscribeRealtime() {
-  if (!supabase || isDemoMode) return;
+  if (!_supabaseClient || isDemoMode) return;
 
   try {
-    supabase
+    _supabaseClient
       .channel('library_live_feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload) => {
         console.log('⚡ Realtime Transaction Event Detected:', payload);
@@ -251,7 +254,7 @@ async function loadAllData() {
 
 // ดึงตัวเลขสถิติด้านบน
 async function fetchStats() {
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     const totalBooks = mockData.books.length;
     const availableBooks = mockData.books.filter(b => b.status === 'available').length;
     const borrowedBooks = mockData.books.filter(b => b.status === 'borrowed').length;
@@ -265,10 +268,10 @@ async function fetchStats() {
   }
 
   try {
-    const { count: totalBooks } = await supabase.from('books').select('*', { count: 'exact', head: true }).is('deleted_at', null);
-    const { count: availableBooks } = await supabase.from('books').select('*', { count: 'exact', head: true }).eq('status', 'available').is('deleted_at', null);
-    const { count: borrowedBooks } = await supabase.from('books').select('*', { count: 'exact', head: true }).eq('status', 'borrowed').is('deleted_at', null);
-    const { count: totalBorrowers } = await supabase.from('borrowers').select('*', { count: 'exact', head: true });
+    const { count: totalBooks } = await _supabaseClient.from('books').select('*', { count: 'exact', head: true }).is('deleted_at', null);
+    const { count: availableBooks } = await _supabaseClient.from('books').select('*', { count: 'exact', head: true }).eq('status', 'available').is('deleted_at', null);
+    const { count: borrowedBooks } = await _supabaseClient.from('books').select('*', { count: 'exact', head: true }).eq('status', 'borrowed').is('deleted_at', null);
+    const { count: totalBorrowers } = await _supabaseClient.from('borrowers').select('*', { count: 'exact', head: true });
 
     document.getElementById('statTotalBooks').textContent = totalBooks ?? 0;
     document.getElementById('statAvailableBooks').textContent = availableBooks ?? 0;
@@ -284,13 +287,13 @@ async function fetchTransactions() {
   const tbody = document.getElementById('transactionTableBody');
   if (!tbody) return;
 
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     renderTransactionRows(mockData.transactions);
     return;
   }
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await _supabaseClient
       .from('transactions')
       .select(`
         id,
@@ -374,13 +377,13 @@ async function fetchBooks() {
   const tbody = document.getElementById('booksTableBody');
   if (!tbody) return;
 
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     renderBookRows(mockData.books);
     return;
   }
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await _supabaseClient
       .from('books')
       .select('*')
       .is('deleted_at', null)
@@ -434,13 +437,13 @@ async function fetchMembers() {
   const tbody = document.getElementById('membersTableBody');
   if (!tbody) return;
 
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     renderMemberRows(mockData.members);
     return;
   }
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await _supabaseClient
       .from('borrowers')
       .select(`
         id,
@@ -513,7 +516,7 @@ async function handleManualBorrow(e) {
   const name = document.getElementById('manualBorrowerName').value.trim();
   const cardUid = document.getElementById('manualCardUid').value.trim();
 
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     // ทำงานในโหมดตัวอย่าง (Demo Mode) ทันที
     const book = mockData.books.find(b => b.qr_code.toUpperCase() === qr.toUpperCase() || b.rfid_uid.toUpperCase() === cardUid.toUpperCase());
     const bookTitle = book ? book.title : 'หนังสือ QR: ' + qr;
@@ -543,18 +546,18 @@ async function handleManualBorrow(e) {
   }
 
   try {
-    const { data, error } = await supabase.rpc('admin_borrow_book', {
+    const { data, error } = await _supabaseClient.rpc('admin_borrow_book', {
       p_qr_code: qr,
       p_borrower_name: name,
       p_rfid_card_uid: cardUid
     });
 
     if (error) {
-      alert('เกิดข้อผิดพลาดจากระบบ: ' + error.message);
+      showToast('❌ เกิดข้อผิดพลาด: ' + error.message, 'error');
       return;
     }
 
-    if (data.status === 'success') {
+    if (data && data.status === 'success') {
       showToast(`✅ บันทึกการยืมสำเร็จ: ${data.book_title}`, 'success');
       playNotificationSound();
       document.getElementById('manualBorrowForm').reset();
@@ -579,7 +582,7 @@ async function submitAddBook(e) {
   const title = document.getElementById('newBookTitle').value.trim();
   const author = document.getElementById('newBookAuthor').value.trim();
 
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     mockData.books.push({
       id: mockData.books.length + 1,
       qr_code,
@@ -597,7 +600,7 @@ async function submitAddBook(e) {
   }
 
   try {
-    const { error } = await supabase.from('books').insert({
+    const { error } = await _supabaseClient.from('books').insert({
       qr_code,
       rfid_uid,
       title,
@@ -607,7 +610,7 @@ async function submitAddBook(e) {
     });
 
     if (error) {
-      alert('เกิดข้อผิดพลาด: ' + error.message);
+      showToast('❌ เกิดข้อผิดพลาด: ' + error.message, 'error');
       return;
     }
 
@@ -617,7 +620,7 @@ async function submitAddBook(e) {
     fetchBooks();
     fetchStats();
   } catch (err) {
-    alert('บันทึกหนังสือไม่สำเร็จ: ' + err.message);
+    showToast('❌ บันทึกหนังสือไม่สำเร็จ: ' + err.message, 'error');
   }
 }
 
@@ -629,7 +632,7 @@ async function submitAddMember(e) {
   const phone = document.getElementById('newMemberPhone').value.trim();
   const card_uid = document.getElementById('newMemberCardUid').value.trim();
 
-  if (isDemoMode || !supabase) {
+  if (isDemoMode || !_supabaseClient) {
     const newId = mockData.members.length + 1;
     mockData.members.push({
       id: newId,
@@ -647,18 +650,18 @@ async function submitAddMember(e) {
   }
 
   try {
-    const { data: borrower, error: err1 } = await supabase
+    const { data: borrower, error: err1 } = await _supabaseClient
       .from('borrowers')
       .insert({ full_name, phone })
       .select()
       .single();
 
     if (err1) {
-      alert('บันทึกสมาชิกไม่สำเร็จ: ' + err1.message);
+      showToast('❌ บันทึกสมาชิกไม่สำเร็จ: ' + err1.message, 'error');
       return;
     }
 
-    const { error: err2 } = await supabase
+    const { error: err2 } = await _supabaseClient
       .from('rfid_cards')
       .upsert({
         card_uid,
@@ -667,7 +670,7 @@ async function submitAddMember(e) {
       }, { onConflict: 'card_uid' });
 
     if (err2) {
-      alert('ผูกบัตร RFID ไม่สำเร็จ: ' + err2.message);
+      showToast('❌ ผูกบัตร RFID ไม่สำเร็จ: ' + err2.message, 'error');
       return;
     }
 
@@ -677,7 +680,7 @@ async function submitAddMember(e) {
     fetchMembers();
     fetchStats();
   } catch (err) {
-    alert('เกิดข้อผิดพลาด: ' + err.message);
+    showToast('❌ เกิดข้อผิดพลาด: ' + err.message, 'error');
   }
 }
 
@@ -729,7 +732,7 @@ function saveSupabaseConfig() {
   key = (key || '').trim();
   
   if (!url || !key) {
-    alert('กรุณากรอกทั้ง Supabase URL และ anon Key');
+    showToast('⚠️ กรุณากรอกทั้ง Supabase URL และ anon Key', 'error');
     return;
   }
 
@@ -744,8 +747,17 @@ function switchToDemoMode() {
   safeStorage.remove('SP_KEY');
   closeConfigModal();
   isDemoMode = true;
-  supabase = null;
-  initSupabase();
+  _supabaseClient = null;
+  loadAllData();
+
+  const statusEl = document.getElementById('connectionStatus');
+  if (statusEl) {
+    statusEl.className = 'cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition';
+    statusEl.title = 'คลิกเพื่อตั้งค่า Supabase จริง';
+    statusEl.onclick = openConfigModal;
+    statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>โหมดตัวอย่าง (Demo Mode) — คลิกตั้งค่า</span>`;
+  }
+
   showToast('ℹ️ สลับเป็นโหมดตัวอย่าง (Demo Mode) เรียบร้อยแล้ว', 'info');
 }
 
@@ -769,29 +781,27 @@ function closeAddMemberModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-// จัดการปิด Modal เมื่อกดปุ่ม Escape หรือคลิกพื้นหลังสีดำ
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    closeConfigModal();
-    closeAddBookModal();
-    closeAddMemberModal();
-  }
-});
-
-// กำหนดให้คลิกพื้นหลังมืดของ Modal เพื่อปิดได้
-['modalConfig', 'modalAddBook', 'modalAddMember'].forEach(id => {
-  const el = document.getElementById(id);
-  if (el) {
-    el.addEventListener('click', (e) => {
-      if (e.target === el) {
-        el.classList.add('hidden');
-      }
-    });
-  }
-});
-
-// เริ่มต้นทำงานทันทีที่โหลดหน้าเว็บ
+// เริ่มต้นทำงานหลังจาก DOM พร้อมเท่านั้น
 document.addEventListener('DOMContentLoaded', () => {
   renderIcons();
+
+  // ผูก Modal event listeners ภายใน DOMContentLoaded เพื่อให้ Element มีอยู่จริง
+  ['modalConfig', 'modalAddBook', 'modalAddMember'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('click', (e) => {
+        if (e.target === el) el.classList.add('hidden');
+      });
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeConfigModal();
+      closeAddBookModal();
+      closeAddMemberModal();
+    }
+  });
+
   initSupabase();
 });
