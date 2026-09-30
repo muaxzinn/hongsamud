@@ -8,9 +8,9 @@
 
 | ชื่อไฟล์ | คำอธิบายหน้าที่ |
 |---|---|
-| [`index.html`](file:///Users/muaxzinn/Project/library-system-laravel-code%20%281%29/03-web-dashboard/index.html) | โครงสร้างหน้าเว็บ หน้าจอสถิติ ตาราง Realtime Feed และหน้าต่าง Modal สำหรับเพิ่มข้อมูล |
-| [`app.js`](file:///Users/muaxzinn/Project/library-system-laravel-code%20%281%29/03-web-dashboard/app.js) | ตรรกะการทำงานฝั่ง JavaScript, การรับข้อมูล Realtime WebSocket และการเรียกใช้ฟังก์ชันฐานข้อมูล |
-| [`config.js`](file:///Users/muaxzinn/Project/library-system-laravel-code%20%281%29/03-web-dashboard/config.js) | ไฟล์ใส่ค่าคอนฟิกเริ่มต้น `SUPABASE_URL` และ `SUPABASE_ANON_KEY` |
+| [`index.html`](file:///Users/muaxzinn/Project/hongsamud/03-web-dashboard/index.html) | โครงสร้างหน้าเว็บ หน้าจอสถิติ ตาราง Realtime Feed และหน้าต่าง Modal สำหรับเพิ่มข้อมูล |
+| [`app.js`](file:///Users/muaxzinn/Project/hongsamud/03-web-dashboard/app.js) | ตรรกะการทำงานฝั่ง JavaScript, การรับข้อมูล Realtime WebSocket และการเรียกใช้ฟังก์ชันฐานข้อมูล |
+| [`config.js`](file:///Users/muaxzinn/Project/hongsamud/03-web-dashboard/config.js) | ไฟล์ใส่ค่าคอนฟิกเริ่มต้น `SUPABASE_URL` และ `SUPABASE_ANON_KEY` |
 
 ---
 
@@ -35,7 +35,7 @@
 คุณสามารถเปิดใช้งานหน้าเว็บได้ทันที 2 วิธี:
 
 ### วิธีที่ 1: ดับเบิลคลิกเปิดไฟล์ตรงๆ
-- ดับเบิลคลิกที่ไฟล์ [`03-web-dashboard/index.html`](file:///Users/muaxzinn/Project/library-system-laravel-code%20%281%29/03-web-dashboard/index.html) เพื่อเปิดผ่าน Google Chrome, Safari, หรือ Edge ได้ทันที
+- ดับเบิลคลิกที่ไฟล์ [`03-web-dashboard/index.html`](file:///Users/muaxzinn/Project/hongsamud/03-web-dashboard/index.html) เพื่อเปิดผ่าน Google Chrome, Safari, หรือ Edge ได้ทันที
 
 ### วิธีที่ 2: รันผ่าน Local Web Server (แนะนำ)
 - หากใช้ **VSCode:** คลิกขวาที่ไฟล์ `index.html` แล้วเลือก **"Open with Live Server"**

@@ -43,12 +43,24 @@ const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";     // ใส่รหัส�
 // 2. ส่วนการตั้งค่า SUPABASE (Supabase Project Configuration)
 // ==============================================================================
 // นำค่ามาจากหน้า Supabase Dashboard -> Project Settings -> API
-const char* SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co"; // URL โปรเจกต์ของคุณ
-const char* SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.YOUR_ANON_KEY..."; // anon / public key
+const char* SUPABASE_URL = "https://adejdtyxhgejtteuspwb.supabase.co"; // URL โปรเจกต์ของคุณ
+const char* SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZWpkdHl4aGdlanR0ZXVzcHdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzMzIyMTcsImV4cCI6MjEwNTkwODIxN30.td0BKgaK7Fp0O7waBKc-pXJWhAMZx8cxvMTytEeHX70"; // anon / public key
 
 // Endpoint ของ RPC function handle_rfid_scan
-// รูปแบบมาตรฐาน: https://<project>.supabase.co/rest/v1/rpc/handle_rfid_scan
-String rpcEndpoint = String(SUPABASE_URL) + "/rest/v1/rpc/handle_rfid_scan";
+String getRpcEndpoint() {
+  String url = String(SUPABASE_URL);
+  url.trim();
+  while (url.endsWith("/")) {
+    url.remove(url.length() - 1);
+  }
+  if (url.endsWith("/rest/v1")) {
+    url.remove(url.length() - 8);
+  }
+  while (url.endsWith("/")) {
+    url.remove(url.length() - 1);
+  }
+  return url + "/rest/v1/rpc/handle_rfid_scan";
+}
 
 // ==============================================================================
 // 3. การกำหนดขาเชื่อมต่อจอแสดงผล OLED 0.96 นิ้ว (I2C SSD1306)
@@ -340,7 +352,7 @@ void sendScanToSupabase(String userUid, String bookUid) {
   client.setInsecure(); // ไม่ตรวจ Root CA Fingerprint เพื่อความเสถียรและสะดวกบน ESP32
 
   HTTPClient https;
-  if (!https.begin(client, rpcEndpoint)) {
+  if (!https.begin(client, getRpcEndpoint())) {
     Serial.println("[ERROR] Unable to connect to Supabase endpoint");
     signalError();
     showErrorScreen("Supabase Unreachable");

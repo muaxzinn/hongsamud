@@ -8,8 +8,10 @@
 
 | ชื่อไฟล์ | คำอธิบายหน้าที่ |
 |---|---|
-| [`esp32_library_rfid_supabase.ino`](file:///Users/muaxzinn/Project/library-system-laravel-code%20%281%29/02-esp32-firmware/esp32_library_rfid_supabase.ino) | **โค้ดหลักของบอร์ด ESP32** เขียนด้วยภาษา Arduino C++ พร้อมคอมเมนต์อธิบายทุกบล็อกคำสั่งอย่างละเอียด |
-| [`platformio.ini`](file:///Users/muaxzinn/Project/library-system-laravel-code%20%281%29/02-esp32-firmware/platformio.ini) | ไฟล์คอนฟิกและติดตั้งไลบรารีอัตโนมัติ สำหรับผู้ที่ใช้ **PlatformIO (VSCode)** |
+| [`esp32_library_rfid_supabase.ino`](file:///Users/muaxzinn/Project/hongsamud/02-esp32-firmware/esp32_library_rfid_supabase.ino) | **โค้ดหลักของบอร์ด ESP32** เขียนด้วยภาษา Arduino C++ พร้อมคอมเมนต์อธิบายทุกบล็อกคำสั่งอย่างละเอียด |
+| [`platformio.ini`](file:///Users/muaxzinn/Project/hongsamud/02-esp32-firmware/platformio.ini) | ไฟล์คอนฟิกและติดตั้งไลบรารีอัตโนมัติ สำหรับผู้ที่ใช้ **PlatformIO (VSCode)** |
+| [`wokwi/`](file:///Users/muaxzinn/Project/hongsamud/02-esp32-firmware/wokwi/README.md) | **ชุดไฟล์สำหรับรันบน Wokwi Simulator** (พร้อม `diagram.json`, `libraries.txt`, `sketch.ino`) ต่อกับ Supabase จริงได้ทันที |
+
 
 ---
 
@@ -96,6 +98,14 @@
 5. กดปุ่ม **Upload** (ลูกศรขวาล่างแถบสีฟ้า) เพื่อคอมไพล์และอัปโหลดทันที
 
 ---
+
+### ทางเลือกที่ 3: จำลองการทำงานบน Wokwi Simulator (ไม่ต้องมีบอร์ดจริง)
+สามารถนำโปรเจกต์นี้ไปรันบนเว็บ [Wokwi.com](https://wokwi.com/projects/new/esp32) โดยเชื่อมต่อกับ **WiFi อินเทอร์เน็ต และฐานข้อมูล Supabase ของจริงทั้งหมด**:
+- มีไฟล์พร้อมใช้งานในโฟลเดอร์ [`wokwi/`](file:///Users/muaxzinn/Project/hongsamud/02-esp32-firmware/wokwi/README.md)
+- ดูคู่มือขั้นตอนและปุ่มลัดการแตะบัตรอย่างละเอียดได้ที่: [`wokwi/README.md`](file:///Users/muaxzinn/Project/hongsamud/02-esp32-firmware/wokwi/README.md)
+
+---
+
 
 ## 📟 ขั้นตอนและแอนิเมชันบนหน้าจอ OLED
 
