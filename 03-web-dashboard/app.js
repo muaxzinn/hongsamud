@@ -8,6 +8,10 @@
 // ⚠️ ตัวแปรนี้ต้องไม่ชื่อ `supabase` เพราะจะชนกับ window.supabase (Supabase SDK CDN)
 let _supabaseClient = null;
 let isDemoMode = false;
+let authStateSubscription = null;
+let realtimeChannel = null;
+let activeAdminId = null;
+let pendingAuthMessage = '';
 
 // ==============================================================================
 // 1. ระบบจัดการพื้นที่จัดเก็บข้อมูลที่ปลอดภัย (Safe Storage for Safari & file://)
@@ -86,6 +90,16 @@ function renderIcons() {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
+}
+
 // ระบบ Toast Notification แจ้งเตือนสวยงาม
 function showToast(msg, type = 'info') {
   let toastContainer = document.getElementById('toastContainer');
@@ -102,7 +116,7 @@ function showToast(msg, type = 'info') {
                   'bg-slate-800 text-slate-100 border-slate-700';
 
   toast.className = `p-4 rounded-xl shadow-2xl border text-xs sm:text-sm font-medium flex items-center gap-3 transition-all duration-300 transform translate-y-4 opacity-0 pointer-events-auto ${bgClass}`;
-  toast.innerHTML = `<span>${msg}</span>`;
+  toast.innerHTML = `<span>${escapeHtml(msg)}</span>`;
 
   toastContainer.appendChild(toast);
   setTimeout(() => {
@@ -141,15 +155,98 @@ function getConfig() {
   return { url, key };
 }
 
+function showLoginMessage(message = '') {
+  const messageEl = document.getElementById('adminLoginMessage');
+  if (!messageEl) return;
+  messageEl.textContent = message;
+  messageEl.classList.toggle('hidden', !message);
+}
+
+function showLoginScreen(message = '') {
+  activeAdminId = null;
+  if (realtimeChannel && _supabaseClient) {
+    _supabaseClient.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+  document.getElementById('modalAddBook')?.classList.add('hidden');
+  document.getElementById('modalAddMember')?.classList.add('hidden');
+  document.getElementById('dashboardApp')?.classList.add('hidden');
+  document.getElementById('adminLoginScreen')?.classList.remove('hidden');
+  document.getElementById('adminSignOutButton')?.classList.add('hidden');
+  document.getElementById('adminSignedInEmail')?.classList.add('hidden');
+  showLoginMessage(message);
+}
+
+function showDashboard(user = null) {
+  document.getElementById('adminLoginScreen')?.classList.add('hidden');
+  document.getElementById('dashboardApp')?.classList.remove('hidden');
+  const signOutButton = document.getElementById('adminSignOutButton');
+  const signedInEmail = document.getElementById('adminSignedInEmail');
+
+  if (isDemoMode) {
+    activeAdminId = null;
+    signOutButton?.classList.add('hidden');
+    signedInEmail?.classList.add('hidden');
+  } else {
+    activeAdminId = user.id;
+    signOutButton?.classList.remove('hidden');
+    signedInEmail.textContent = user.email || '';
+    signedInEmail.classList.remove('hidden');
+  }
+
+  renderIcons();
+  loadAllData();
+  if (!isDemoMode) subscribeRealtime();
+}
+
+function handleAuthSession(session) {
+  if (!session) {
+    const message = pendingAuthMessage;
+    pendingAuthMessage = '';
+    showLoginScreen(message);
+    return;
+  }
+
+  if (session.user.app_metadata?.role !== 'admin') {
+    pendingAuthMessage = 'บัญชีนี้ยังไม่ได้รับสิทธิ์แอดมิน โปรดติดต่อเจ้าของระบบ';
+    showLoginScreen(pendingAuthMessage);
+    setTimeout(() => {
+      if (!_supabaseClient) return;
+      _supabaseClient.auth.signOut().then(({ error }) => {
+        if (error) {
+          console.error('Unauthorized sign-out error:', error);
+          showLoginMessage('บัญชีนี้ไม่มีสิทธิ์แอดมิน และออกจากระบบไม่สำเร็จ กรุณาลองใหม่');
+        }
+      });
+    }, 0);
+    return;
+  }
+
+  if (activeAdminId === session.user.id) return;
+  pendingAuthMessage = '';
+  showLoginMessage();
+  showDashboard(session.user);
+}
+
+function clearSupabaseSubscriptions() {
+  authStateSubscription?.unsubscribe();
+  authStateSubscription = null;
+  if (realtimeChannel && _supabaseClient) {
+    _supabaseClient.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+}
+
 // เริ่มต้นการเชื่อมต่อ Supabase Client
-function initSupabase() {
+async function initSupabase() {
   const { url, key } = getConfig();
   const statusEl = document.getElementById('connectionStatus');
 
   // ตรวจสอบว่ามี URL และ Key จริงหรือไม่
-  const hasValidConfig = url && key && !url.includes('YOUR_PROJECT_REF') && !key.includes('YOUR_ANON_KEY') && url.startsWith('http');
+  const hasValidConfig = url && key && !url.includes('YOUR_PROJECT_REF') && !key.includes('YOUR_ANON_KEY') && key !== '******' && url.startsWith('http');
 
   if (!hasValidConfig) {
+    clearSupabaseSubscriptions();
     isDemoMode = true;
     _supabaseClient = null;
     if (statusEl) {
@@ -158,11 +255,12 @@ function initSupabase() {
       statusEl.onclick = openConfigModal;
       statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>โหมดตัวอย่าง (Demo Mode) — คลิกตั้งค่า</span>`;
     }
-    loadAllData();
+    showDashboard();
     return;
   }
 
   try {
+    clearSupabaseSubscriptions();
     // ใช้ local var supabaseLib เข้าถึง SDK ไม่ชนกับ _supabaseClient
     const supabaseLib = window.supabase;
     if (!supabaseLib || typeof supabaseLib.createClient !== 'function') {
@@ -173,37 +271,80 @@ function initSupabase() {
     isDemoMode = false;
 
     if (statusEl) {
-      statusEl.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+      statusEl.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700';
       statusEl.onclick = null;
-      statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 live-dot"></span><span>Supabase เชื่อมต่อสด</span>`;
+      statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-indigo-400"></span><span>รอเข้าสู่ระบบแอดมิน</span>`;
     }
 
-    loadAllData();
-    subscribeRealtime();
-    showToast('🟢 เชื่อมต่อกับ Supabase สำเร็จ!', 'success');
+    showLoginScreen();
+    const { data: authListener } = _supabaseClient.auth.onAuthStateChange((_event, session) => {
+      handleAuthSession(session);
+    });
+    authStateSubscription = authListener.subscription;
+
+    const { data, error } = await _supabaseClient.auth.getSession();
+    if (error) throw error;
+    handleAuthSession(data.session);
 
   } catch (err) {
     console.error('Supabase Initialization Error:', err);
-    isDemoMode = true;
-    _supabaseClient = null;
+    pendingAuthMessage = 'เชื่อมต่อ Supabase ไม่สำเร็จ: ' + err.message;
+    showLoginScreen(pendingAuthMessage);
     if (statusEl) {
       statusEl.className = 'cursor-pointer flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 transition';
       statusEl.onclick = openConfigModal;
       statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400"></span><span>เชื่อมต่อไม่สำเร็จ (คลิกเพื่อแก้ไข)</span>`;
     }
     showToast('⚠️ ' + err.message, 'error');
-    loadAllData();
   }
+}
+
+async function signInAdmin(event) {
+  event.preventDefault();
+  if (!_supabaseClient || isDemoMode) {
+    showLoginMessage('กรุณาตั้งค่า Supabase URL และ anon key ก่อนเข้าสู่ระบบ');
+    openConfigModal();
+    return;
+  }
+
+  const email = document.getElementById('adminEmail').value.trim();
+  const password = document.getElementById('adminPassword').value;
+  const button = document.getElementById('adminLoginButton');
+  button.disabled = true;
+  showLoginMessage();
+
+  try {
+    const { error } = await _supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    document.getElementById('adminLoginForm').reset();
+  } catch (err) {
+    console.error('Admin sign-in error:', err);
+    showLoginMessage('เข้าสู่ระบบไม่สำเร็จ: ' + err.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function signOutAdmin() {
+  if (!_supabaseClient || isDemoMode) return;
+  const { error } = await _supabaseClient.auth.signOut();
+  if (error) {
+    console.error('Admin sign-out error:', error);
+    showToast('ออกจากระบบไม่สำเร็จ: ' + error.message, 'error');
+    return;
+  }
+  clearSupabaseSubscriptions();
+  showLoginScreen();
 }
 
 // ==============================================================================
 // 4. การรับข้อมูลแบบเรียลไทม์ (Supabase Realtime Subscription)
 // ==============================================================================
 function subscribeRealtime() {
-  if (!_supabaseClient || isDemoMode) return;
+  if (!_supabaseClient || isDemoMode || realtimeChannel) return;
 
   try {
-    _supabaseClient
+    realtimeChannel = _supabaseClient
       .channel('library_live_feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload) => {
         console.log('⚡ Realtime Transaction Event Detected:', payload);
@@ -268,17 +409,25 @@ async function fetchStats() {
   }
 
   try {
-    const { count: totalBooks } = await _supabaseClient.from('books').select('*', { count: 'exact', head: true }).is('deleted_at', null);
-    const { count: availableBooks } = await _supabaseClient.from('books').select('*', { count: 'exact', head: true }).eq('status', 'available').is('deleted_at', null);
-    const { count: borrowedBooks } = await _supabaseClient.from('books').select('*', { count: 'exact', head: true }).eq('status', 'borrowed').is('deleted_at', null);
-    const { count: totalBorrowers } = await _supabaseClient.from('borrowers').select('*', { count: 'exact', head: true });
+    const [booksResult, availableResult, borrowedResult, borrowersResult] = await Promise.all([
+      _supabaseClient.from('books').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+      _supabaseClient.from('books').select('*', { count: 'exact', head: true }).eq('status', 'available').is('deleted_at', null),
+      _supabaseClient.from('books').select('*', { count: 'exact', head: true }).eq('status', 'borrowed').is('deleted_at', null),
+      _supabaseClient.from('borrowers').select('*', { count: 'exact', head: true })
+    ]);
+    const firstError = [booksResult, availableResult, borrowedResult, borrowersResult].find(result => result.error)?.error;
+    if (firstError) throw firstError;
 
-    document.getElementById('statTotalBooks').textContent = totalBooks ?? 0;
-    document.getElementById('statAvailableBooks').textContent = availableBooks ?? 0;
-    document.getElementById('statBorrowedBooks').textContent = borrowedBooks ?? 0;
-    document.getElementById('statTotalBorrowers').textContent = totalBorrowers ?? 0;
+    document.getElementById('statTotalBooks').textContent = booksResult.count ?? 0;
+    document.getElementById('statAvailableBooks').textContent = availableResult.count ?? 0;
+    document.getElementById('statBorrowedBooks').textContent = borrowedResult.count ?? 0;
+    document.getElementById('statTotalBorrowers').textContent = borrowersResult.count ?? 0;
   } catch (err) {
     console.error('Fetch Stats Error:', err);
+    ['statTotalBooks', 'statAvailableBooks', 'statBorrowedBooks', 'statTotalBorrowers'].forEach((id) => {
+      document.getElementById(id).textContent = '—';
+    });
+    showToast('โหลดสถิติไม่สำเร็จ: ' + err.message, 'error');
   }
 }
 
@@ -308,7 +457,8 @@ async function fetchTransactions() {
       .order('borrowed_at', { ascending: false })
       .limit(25);
 
-    if (error || !data || data.length === 0) {
+    if (error) throw error;
+    if (!data || data.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">ยังไม่มีประวัติการทำรายการในระบบ</td></tr>`;
       return;
     }
@@ -327,7 +477,8 @@ async function fetchTransactions() {
     renderTransactionRows(formatted);
   } catch (err) {
     console.error('Fetch Transactions Error:', err);
-    renderTransactionRows(mockData.transactions);
+    tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-10 text-center text-rose-300">โหลดประวัติไม่สำเร็จ: ${escapeHtml(err.message)}</td></tr>`;
+    showToast('โหลดประวัติไม่สำเร็จ: ' + err.message, 'error');
   }
 }
 
@@ -359,10 +510,10 @@ function renderTransactionRows(list) {
       <tr class="hover:bg-slate-800/40 transition">
         <td class="px-6 py-4 text-xs text-slate-400 font-mono">${borrowTime}</td>
         <td class="px-6 py-4">${actionBadge}</td>
-        <td class="px-6 py-4 font-medium text-white">${bookTitle}</td>
-        <td class="px-6 py-4 text-slate-300">${borrowerName}</td>
+        <td class="px-6 py-4 font-medium text-white">${escapeHtml(bookTitle)}</td>
+        <td class="px-6 py-4 text-slate-300">${escapeHtml(borrowerName)}</td>
         <td class="px-6 py-4 text-xs text-slate-300">
-          ${isReturned ? `คืนแล้วเมื่อ ${returnTime}` : `ครบกำหนด: <span class="text-amber-300 font-medium">${tx.due_date}</span>`}
+          ${isReturned ? `คืนแล้วเมื่อ ${escapeHtml(returnTime)}` : `ครบกำหนด: <span class="text-amber-300 font-medium">${escapeHtml(tx.due_date)}</span>`}
         </td>
         <td class="px-6 py-4">${fineBadge}</td>
       </tr>
@@ -389,15 +540,17 @@ async function fetchBooks() {
       .is('deleted_at', null)
       .order('id', { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      renderBookRows(mockData.books);
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      renderBookRows([]);
       return;
     }
 
     renderBookRows(data);
   } catch (err) {
     console.error('Fetch Books Error:', err);
-    renderBookRows(mockData.books);
+    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-rose-300">โหลดรายการหนังสือไม่สำเร็จ: ${escapeHtml(err.message)}</td></tr>`;
+    showToast('โหลดรายการหนังสือไม่สำเร็จ: ' + err.message, 'error');
   }
 }
 
@@ -417,15 +570,15 @@ function renderBookRows(books) {
     } else if (b.status === 'borrowed') {
       statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">ถูกยืม (Borrowed)</span>`;
     } else {
-      statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">${b.status}</span>`;
+      statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">${escapeHtml(b.status)}</span>`;
     }
 
     return `
       <tr class="hover:bg-slate-800/40 transition">
-        <td class="px-6 py-4 font-mono text-xs text-indigo-400 font-semibold">${b.qr_code}</td>
-        <td class="px-6 py-4 font-mono text-xs text-emerald-300">${b.rfid_uid || '<span class="text-slate-500">ยังไม่ผูก Tag</span>'}</td>
-        <td class="px-6 py-4 font-medium text-white">${b.title}</td>
-        <td class="px-6 py-4 text-slate-400 text-xs">${b.author || '-'}</td>
+        <td class="px-6 py-4 font-mono text-xs text-indigo-400 font-semibold">${escapeHtml(b.qr_code)}</td>
+        <td class="px-6 py-4 font-mono text-xs text-emerald-300">${b.rfid_uid ? escapeHtml(b.rfid_uid) : '<span class="text-slate-500">ยังไม่ผูก Tag</span>'}</td>
+        <td class="px-6 py-4 font-medium text-white">${escapeHtml(b.title)}</td>
+        <td class="px-6 py-4 text-slate-400 text-xs">${escapeHtml(b.author || '-')}</td>
         <td class="px-6 py-4">${statusBadge}</td>
       </tr>
     `;
@@ -453,8 +606,9 @@ async function fetchMembers() {
       `)
       .order('id', { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      renderMemberRows(mockData.members);
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      renderMemberRows([]);
       return;
     }
 
@@ -472,7 +626,8 @@ async function fetchMembers() {
     renderMemberRows(formatted);
   } catch (err) {
     console.error('Fetch Members Error:', err);
-    renderMemberRows(mockData.members);
+    tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-10 text-center text-rose-300">โหลดรายชื่อสมาชิกไม่สำเร็จ: ${escapeHtml(err.message)}</td></tr>`;
+    showToast('โหลดรายชื่อสมาชิกไม่สำเร็จ: ' + err.message, 'error');
   }
 }
 
@@ -486,14 +641,14 @@ function renderMemberRows(members) {
   }
 
   tbody.innerHTML = members.map(m => {
-    const cardUid = m.card_uid || '<span class="text-slate-500">ไม่มีบัตร</span>';
+    const cardUid = m.card_uid ? escapeHtml(m.card_uid) : '<span class="text-slate-500">ไม่มีบัตร</span>';
     const isActive = m.is_active;
 
     return `
       <tr class="hover:bg-slate-800/40 transition">
-        <td class="px-6 py-4 text-xs text-slate-400 font-mono">${m.id}</td>
-        <td class="px-6 py-4 font-medium text-white">${m.full_name}</td>
-        <td class="px-6 py-4 text-slate-300 text-xs font-mono">${m.phone || '-'}</td>
+        <td class="px-6 py-4 text-xs text-slate-400 font-mono">${escapeHtml(m.id)}</td>
+        <td class="px-6 py-4 font-medium text-white">${escapeHtml(m.full_name)}</td>
+        <td class="px-6 py-4 text-slate-300 text-xs font-mono">${escapeHtml(m.phone || '-')}</td>
         <td class="px-6 py-4 font-mono text-xs text-indigo-400 font-semibold">${cardUid}</td>
         <td class="px-6 py-4">
           ${isActive 
@@ -739,16 +894,16 @@ function saveSupabaseConfig() {
   safeStorage.set('SP_URL', url);
   safeStorage.set('SP_KEY', key);
   closeConfigModal();
-  initSupabase();
+  void initSupabase();
 }
 
 function switchToDemoMode() {
+  clearSupabaseSubscriptions();
   safeStorage.remove('SP_URL');
   safeStorage.remove('SP_KEY');
   closeConfigModal();
   isDemoMode = true;
   _supabaseClient = null;
-  loadAllData();
 
   const statusEl = document.getElementById('connectionStatus');
   if (statusEl) {
@@ -758,6 +913,7 @@ function switchToDemoMode() {
     statusEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span><span>โหมดตัวอย่าง (Demo Mode) — คลิกตั้งค่า</span>`;
   }
 
+  showDashboard();
   showToast('ℹ️ สลับเป็นโหมดตัวอย่าง (Demo Mode) เรียบร้อยแล้ว', 'info');
 }
 
@@ -803,5 +959,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  initSupabase();
+  void initSupabase();
 });
